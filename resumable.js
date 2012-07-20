@@ -1,9 +1,3 @@
-/*
-* MIT Licensed
-* http://www.23developer.com/opensource
-* http://github.com/23/resumable.js
-* Steffen Tiedemann Christensen, steffen@23company.com
-*/
 
 var Resumable = function(opts){
   if ( !(this instanceof Resumable ) ) {
@@ -201,7 +195,6 @@ var Resumable = function(opts){
     var $ = this;
     $.resumableObj = resumableObj;
     $.fileObj = fileObj;
-    $.fileObjSize = fileObj.file.size;
     $.offset = offset;
     $.callback = callback;
     $.lastProgressCallback = (new Date);
@@ -211,9 +204,9 @@ var Resumable = function(opts){
     $.loaded = 0;
     $.startByte = $.offset*$.resumableObj.opts.chunkSize;
     $.endByte = ($.offset+1)*$.resumableObj.opts.chunkSize;
-    if ($.fileObjSize-$.endByte < $.resumableObj.opts.chunkSize) {
+    if ($.fileObj.file.size-$.endByte < $.resumableObj.opts.chunkSize) {
       // The last chunk will be bigger than the chunk size, but less than 2*chunkSize
-      $.endByte = $.fileObjSize;
+      $.endByte = $.fileObj.file.size;
     }
     $.xhr = null;
 
@@ -227,7 +220,7 @@ var Resumable = function(opts){
         var status = $.status();
         if(status=='success') {
           $.callback(status, $.message());
-          $.resumableObj.uploadNextChunk();
+          $.resumableObj.uploadNextChunk($.message());
         } else {
           $.send();
         }
@@ -244,7 +237,7 @@ var Resumable = function(opts){
       // Add extra data to identify chunk
       params.push(['resumableChunkNumber', encodeURIComponent($.offset+1)].join('='));
       params.push(['resumableChunkSize', encodeURIComponent($.resumableObj.opts.chunkSize)].join('='));
-      params.push(['resumableTotalSize', encodeURIComponent($.fileObjSize)].join('='));
+      params.push(['resumableTotalSize', encodeURIComponent($.fileObj.file.size)].join('='));
       params.push(['resumableIdentifier', encodeURIComponent($.fileObj.uniqueIdentifier)].join('='));
       params.push(['resumableFilename', encodeURIComponent($.fileObj.fileName)].join('='));
       // Append the relevant chunk and send it
@@ -296,11 +289,11 @@ var Resumable = function(opts){
       // Add extra data to identify chunk
       formData.append('resumableChunkNumber', $.offset+1);
       formData.append('resumableChunkSize', $.resumableObj.opts.chunkSize);
-      formData.append('resumableTotalSize', $.fileObjSize);
+      formData.append('resumableTotalSize', $.fileObj.file.size);
       formData.append('resumableIdentifier', $.fileObj.uniqueIdentifier);
       formData.append('resumableFilename', $.fileObj.fileName);
       // Append the relevant chunk and send it
-      var func = ($.fileObj.file.mozSlice ? 'mozSlice' : ($.fileObj.file.webkitSlice ? 'webkitSlice' : 'slice'));
+      var func = ($.fileObj.file.mozSlice ? 'mozSlice' : 'webkitSlice');
       formData.append($.resumableObj.opts.fileParameterName, $.fileObj.file[func]($.startByte,$.endByte));
       $.xhr.open("POST", $.resumableObj.opts.target);
       //$.xhr.open("POST", '/sandbox');
@@ -313,6 +306,11 @@ var Resumable = function(opts){
     }
     $.status = function(){
       // Returns: 'pending', 'uploading', 'success', 'error'
+      
+      if($.skipped) {
+        return 'success';
+      }
+      
       if(!$.xhr) {
         return('pending');
       } else if($.xhr.readyState<4) {
@@ -333,12 +331,17 @@ var Resumable = function(opts){
         }
       }
     }
+    
+    $.skip = function() {
+    
+    	$.skipped = true;
+    }
     $.message = function(){
       return($.xhr ? $.xhr.responseText : '');
     }
     $.progress = function(relative){
       if(typeof(relative)==='undefined') relative = false;
-      var factor = (relative ? ($.endByte-$.startByte)/$.fileObjSize : 1);
+      var factor = (relative ? ($.endByte-$.startByte)/$.fileObj.file.size : 1);
       var s = $.status();
       switch(s){
       case 'success':
@@ -354,8 +357,23 @@ var Resumable = function(opts){
   }
 
   // QUEUE
-  $.uploadNextChunk = function(){
+  $.uploadNextChunk = function(chunk_id){
     var found = false;
+    
+    // When the server tells us to resume upload at a certain point, skip chunks up to that point
+    if(chunk_id) {
+    	
+    	//loop through all the files in queue and skip chunks
+    	$h.each($.files, function(file){
+    	
+    		for(var i = 0; i<(chunk_id-1); i++) {
+    	
+    		 	file.chunks[i].skip();
+    		}	
+    	});
+    	
+    }
+    
 
     // In some cases (such as videos) it's really handy to upload the first 
     // and last chunk of a file quickly; this let's the server check the file's 
@@ -379,7 +397,7 @@ var Resumable = function(opts){
     // Now, simply look for the next, best thing to upload
     $h.each($.files, function(file){
         $h.each(file.chunks, function(chunk){
-            if(chunk.status()=='pending') {
+            if(chunk.status()=='pending' && !chunk.skipped) {
               chunk.send();
               found = true;
               return(false);
