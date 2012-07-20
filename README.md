@@ -63,6 +63,9 @@ This will allow uploads to be resumed after browser restarts and even across bro
 
 * If this request returns a `200` HTTP code, the chunks is assumed to have been completed.
 * If the request returns anything else, the chunk will be uploaded in the standard fashion.
+* 
+
+For faster resumes, the server can send back the next missing chunk ID in the content of the GET request. This will allow the file to quickly resume uploading at that chunk. Otherwise, resumable will send a GET test request for every chunk.
 
 ## Full documentation
 
